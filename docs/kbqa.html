@@ -10,19 +10,20 @@
     button{cursor:pointer}
     details summary{cursor:pointer}
     pre{white-space:pre-wrap;background:#fcfcfc;border:1px solid #eee;border-radius:10px;padding:10px;overflow:auto}
+    .muted{font-size:12px;color:#555}
   </style>
 </head>
 <body>
   <div id="kbqa" class="card">
     <h3 style="margin:0 0 6px">Knowledge Base Q&A (with Citations)</h3>
-    <p style="margin:0 0 12px;color:#444">Upload 1–3 PDFs, then ask a question. The browser performs a light retrieval over sentence chunks and cites exact pages. Everything runs locally.</p>
+    <p style="margin:0 0 12px;color:#444">Upload 1–3 text-based PDFs, then ask a question. All processing happens in your browser.</p>
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
       <input id="kb-files" type="file" accept="application/pdf" multiple style="flex:1 1 320px;padding:8px;border:1px solid #ddd;border-radius:10px">
       <button id="kb-index" style="padding:10px 12px;border:0;border-radius:10px;background:#111;color:#fff">Index PDFs</button>
     </div>
 
-    <div id="kb-status" style="font-size:12px;color:#555;margin-bottom:8px"></div>
+    <div id="kb-status" class="muted" style="margin-bottom:8px"></div>
 
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <input id="kb-q" placeholder="Ask a question…" style="flex:1 1 420px;padding:10px;border:1px solid #ddd;border-radius:10px">
@@ -36,22 +37,35 @@
     </details>
   </div>
 
-  <!-- pdf.js -->
+  <!-- pdf.js (classic build) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js"></script>
   <script>
-    // (Optional) use a worker for speed
-    try {
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.worker.min.js";
-    } catch(e) {}
-
     (function(){
       const statusEl = document.getElementById('kb-status');
       const askBtn   = document.getElementById('kb-ask');
       const outEl    = document.getElementById('kb-out');
       const dbgEl    = document.getElementById('kb-json');
+
+      // Force workerless mode to avoid cross-origin worker issues on GitHub Pages/Carrd.
+      try {
+        if (pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = null;
+          // Some versions use disableWorker; set it if present.
+          if ('disableWorker' in pdfjsLib.GlobalWorkerOptions) {
+            pdfjsLib.GlobalWorkerOptions.disableWorker = true;
+          }
+        }
+      } catch(e) {/* ignore */}
+
       let index = []; // {doc, page, text, tokens}
       let docNames = [];
+
+      function showError(prefix, e){
+        const msg = (e && (e.message || e.toString())) || 'Unknown error';
+        statusEl.textContent = `${prefix}: ${msg}`;
+        if (e && e.stack) dbgEl.textContent = e.stack;
+        console.error(prefix, e);
+      }
 
       function tokens(s){
         return (s||'').toLowerCase()
@@ -62,13 +76,13 @@
 
       async function extractPDF(file){
         const arrayBuf = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({data: arrayBuf}).promise;
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise;
         const doc = {name: file.name, pages: []};
         const maxPages = Math.min(pdf.numPages, 40); // safety cap
         for(let p=1; p<=maxPages; p++){
           const page = await pdf.getPage(p);
           const tc = await page.getTextContent();
-          const text = tc.items.map(i=>i.str).join(' ');
+          const text = (tc.items || []).map(i=>i.str).join(' ');
           doc.pages.push(text);
         }
         return doc;
@@ -129,7 +143,7 @@
 
       document.getElementById('kb-index').addEventListener('click', async ()=>{
         const files = Array.from(document.getElementById('kb-files').files||[]).slice(0,3);
-        if(!files.length){ statusEl.textContent='Please choose 1–3 PDFs.'; return; }
+        if(!files.length){ statusEl.textContent='Please choose 1–3 PDFs (text-based, not scanned).'; return; }
         statusEl.textContent = 'Reading PDFs…';
         try{
           const docs = [];
@@ -140,31 +154,34 @@
           document.getElementById('kb-out').style.display='none';
           dbgEl.textContent = JSON.stringify({docs: docNames, chunks: index.length}, null, 2);
         }catch(e){
-          statusEl.textContent = 'Failed to read PDFs.';
-          console.error(e);
+          showError('Failed to read PDFs', e);
         }
       });
 
       askBtn.addEventListener('click', ()=>{
         const q = document.getElementById('kb-q').value.trim();
         if(!q){ return; }
-        const res = answer(q);
-        outEl.style.display='block';
-        const citeHtml = res.cites.map(c=>{
-          const dn = docNames[c.doc]||`Doc ${c.doc+1}`;
-          const snip = c.text.length>140 ? c.text.slice(0,137)+'…' : c.text;
-          return `<div style="margin:6px 0;padding:8px;background:#fff;border:1px solid #eee;border-radius:10px">
-            <div style="font-size:12px;color:#555"><strong>${dn}</strong> • Page ${c.page}</div>
-            <div style="margin-top:4px">${snip.replace(/</g,'&lt;')}</div>
-          </div>`;
-        }).join('');
-        outEl.innerHTML = `
-          <div style="margin-bottom:8px"><strong>Answer (extractive)</strong></div>
-          <div>${res.summary || '<em>No clear answer found.</em>'}</div>
-          <div style="margin-top:10px"><strong>Citations</strong></div>
-          ${citeHtml || '<em>No relevant citations.</em>'}
-          <div style="margin-top:8px;font-size:12px;color:#555">Demo logic: keyword retrieval over sentence chunks; plug a server LLM for abstractive answers.</div>
-        `;
+        try{
+          const res = answer(q);
+          outEl.style.display='block';
+          const citeHtml = res.cites.map(c=>{
+            const dn = docNames[c.doc]||`Doc ${c.doc+1}`;
+            const snip = c.text.length>140 ? c.text.slice(0,137)+'…' : c.text;
+            return `<div style="margin:6px 0;padding:8px;background:#fff;border:1px solid #eee;border-radius:10px">
+              <div class="muted"><strong>${dn}</strong> • Page ${c.page}</div>
+              <div style="margin-top:4px">${snip.replace(/</g,'&lt;')}</div>
+            </div>`;
+          }).join('');
+          outEl.innerHTML = `
+            <div style="margin-bottom:8px"><strong>Answer (extractive)</strong></div>
+            <div>${res.summary || '<em>No clear answer found.</em>'}</div>
+            <div style="margin-top:10px"><strong>Citations</strong></div>
+            ${citeHtml || '<em>No relevant citations.</em>'}
+            <div class="muted" style="margin-top:8px">Demo logic: keyword retrieval over sentence chunks; plug a server LLM for abstractive answers.</div>
+          `;
+        }catch(e){
+          showError('Failed to answer', e);
+        }
       });
     })();
   </script>
