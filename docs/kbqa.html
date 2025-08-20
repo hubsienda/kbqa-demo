@@ -5,46 +5,87 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Knowledge Base Q&A (with Citations)</title>
   <style>
+    :root{--card-b:#eee;--muted:#555}
     body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:0;padding:24px;background:#fff}
-    .card{max-width:860px;margin:0 auto;padding:16px;border:1px solid #eee;border-radius:14px}
+    .card{max-width:860px;margin:0 auto 16px auto;padding:16px;border:1px solid var(--card-b);border-radius:14px}
     button{cursor:pointer}
     details summary{cursor:pointer}
     pre{white-space:pre-wrap;background:#fcfcfc;border:1px solid #eee;border-radius:10px;padding:10px;overflow:auto}
-    .muted{font-size:12px;color:#555}
+    .muted{font-size:12px;color:var(--muted)}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .btn{padding:10px 12px;border-radius:10px}
+    .btn-dark{border:0;background:#111;color:#fff}
+    .btn-outline{border:1px solid #111;background:#fff}
+    .pill{background:#fff;border:1px solid #eee;border-radius:10px;padding:8px}
   </style>
 </head>
 <body>
+
+  <!-- Demo card -->
   <div id="kbqa" class="card">
     <h3 style="margin:0 0 6px">Knowledge Base Q&A (with Citations)</h3>
-    <p style="margin:0 0 12px;color:#444">Upload 1–3 text-based PDFs, then ask a question. All processing happens in your browser.</p>
+    <p style="margin:0 0 4px;color:#444">
+      Upload 1–3 text-based PDFs, then ask a question. All processing happens in your browser.
+    </p>
+    <p class="muted" style="margin:0 0 12px">
+      <strong>Privacy:</strong> Your files never leave your device — all processing happens locally in your browser.
+    </p>
 
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+    <div class="row" style="margin-bottom:10px">
       <input id="kb-files" type="file" accept="application/pdf" multiple
              style="flex:1 1 320px;padding:8px;border:1px solid #ddd;border-radius:10px">
-      <button id="kb-index" style="padding:10px 12px;border:0;border-radius:10px;background:#111;color:#fff">Index PDFs</button>
+      <button id="kb-index" class="btn btn-dark">Index PDFs</button>
     </div>
 
     <div id="kb-status" class="muted" style="margin-bottom:8px"></div>
 
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <div class="row" style="align-items:flex-end">
       <input id="kb-q" placeholder="Ask a question…"
              style="flex:1 1 420px;padding:10px;border:1px solid #ddd;border-radius:10px">
-      <button id="kb-ask" disabled
-              style="padding:10px 12px;border:0;border-radius:10px;background:#999;color:#fff">Answer</button>
+      <button id="kb-ask" class="btn btn-dark" disabled>Answer</button>
+      <button id="kb-reset" class="btn btn-outline">Reset</button>
+      <button id="kb-save"  class="btn btn-outline">Download answer</button>
     </div>
 
     <div id="kb-out" style="display:none;margin-top:12px;padding:12px;background:#f8fafc;border-radius:12px"></div>
 
-    <details style="margin-top:10px">
-      <summary>See the logic (debug)</summary>
+    <details style="margin-top:10px"><summary>See the logic (debug)</summary>
       <pre id="kb-json"></pre>
     </details>
   </div>
 
-  <!-- Use the last UMD build that exposes window.pdfjsLib -->
+  <!-- How to use -->
+  <div class="card">
+    <h3 style="margin:0 0 8px">How to use this Q&A with Citations</h3>
+    <ol style="margin:0 0 10px 18px;line-height:1.5">
+      <li>Click <strong>Index PDFs</strong> and choose <strong>1–3 PDF files</strong> (e.g., product sheets). Use text-based PDFs (not scanned images).</li>
+      <li>Wait for the status line to say <em>“Indexed … sentence chunks.”</em> The <strong>Answer</strong> button will become active.</li>
+      <li>Type your question (e.g., “What are the storage conditions?”) and click <strong>Answer</strong>.</li>
+      <li>Read the <strong>Answer (extractive)</strong> and verify the <strong>Citations</strong> cards (Document name • Page number + snippet).</li>
+    </ol>
+    <details style="margin-top:8px">
+      <summary>Examples to try</summary>
+      <ul style="margin:8px 0 0 18px;line-height:1.5">
+        <li>“What are the shelf-life and storage temperature requirements?”</li>
+        <li>“List the allergens and handling warnings.”</li>
+        <li>“Which certifications are mentioned for this product?”</li>
+        <li>“What are the pack sizes and pallet configuration?”</li>
+      </ul>
+    </details>
+    <details style="margin-top:6px">
+      <summary>Troubleshooting</summary>
+      <ul style="margin:8px 0 0 18px;line-height:1.5">
+        <li><strong>“Failed to read PDFs”</strong>: ensure the file is a standard, text-based PDF and try again.</li>
+        <li><strong>No/poor results</strong>: the PDF may be a scan without OCR; use an OCR’d version.</li>
+        <li><strong>Large files feel slow</strong>: try fewer pages or smaller files.</li>
+      </ul>
+    </details>
+  </div>
+
+  <!-- pdf.js UMD build that exposes window.pdfjsLib -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>
-    // Load a matching worker from the same version (prevents "fake worker" warnings)
+    // Match worker version to avoid warnings.
     if (window.pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
       pdfjsLib.GlobalWorkerOptions.workerSrc =
         "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -55,14 +96,25 @@
       const askBtn   = document.getElementById('kb-ask');
       const outEl    = document.getElementById('kb-out');
       const dbgEl    = document.getElementById('kb-json');
-      let index = []; // {doc, page, text, tokens}
-      let docNames = [];
+      const filesEl  = document.getElementById('kb-files');
+      const qEl      = document.getElementById('kb-q');
+
+      let index = [];      // {doc, page, text, tokens}
+      let docNames = [];   // ["file1.pdf", ...]
+      let lastAnswerText = ""; // for download
 
       function guardPdfjs(){
         if (typeof pdfjsLib === 'undefined') {
           statusEl.textContent = 'Failed to load pdf.js from CDN (pdfjsLib is undefined).';
           throw new Error('pdfjsLib not available');
         }
+      }
+
+      function showError(prefix, e){
+        const msg = (e && (e.message || e.toString())) || 'Unknown error';
+        statusEl.textContent = `${prefix}: ${msg}`;
+        if (e && e.stack) dbgEl.textContent = e.stack;
+        console.error(prefix, e);
       }
 
       function tokens(s){
@@ -134,39 +186,34 @@
         return { summary: uniqueChosen.join(' '), cites };
       }
 
-      function showError(prefix, e){
-        const msg = (e && (e.message || e.toString())) || 'Unknown error';
-        statusEl.textContent = `${prefix}: ${msg}`;
-        if (e && e.stack) dbgEl.textContent = e.stack;
-        console.error(prefix, e);
-      }
-
+      // Index PDFs
       document.getElementById('kb-index').addEventListener('click', async ()=>{
         try{
           guardPdfjs();
-          const files = Array.from(document.getElementById('kb-files').files || []).slice(0,3);
+          const files = Array.from(filesEl.files || []).slice(0,3);
           if (!files.length) { statusEl.textContent = 'Please choose 1–3 PDFs (text-based, not scanned).'; return; }
           statusEl.textContent = 'Reading PDFs…';
           const docs = [];
           for (const f of files) docs.push(await extractPDF(f));
           buildIndex(docs);
           statusEl.textContent = `Indexed ${docs.length} document(s), ${index.length} sentence chunks.`;
-          askBtn.disabled = false; askBtn.style.background = '#111'; askBtn.style.cursor = 'pointer';
-          document.getElementById('kb-out').style.display = 'none';
+          askBtn.disabled = false; askBtn.classList.add('btn-dark'); askBtn.style.background = '#111';
+          outEl.style.display = 'none';
           dbgEl.textContent = JSON.stringify({ docs: docNames, chunks: index.length }, null, 2);
         } catch(e){ showError('Failed to read PDFs', e); }
       });
 
+      // Answer
       askBtn.addEventListener('click', ()=>{
         try{
-          const q = document.getElementById('kb-q').value.trim();
+          const q = qEl.value.trim();
           if (!q) return;
           const res = answer(q);
           outEl.style.display = 'block';
           const citeHtml = res.cites.map(c=>{
             const dn = docNames[c.doc] || `Doc ${c.doc+1}`;
             const snip = c.text.length > 140 ? c.text.slice(0,137) + '…' : c.text;
-            return `<div style="margin:6px 0;padding:8px;background:#fff;border:1px solid #eee;border-radius:10px">
+            return `<div class="pill" style="margin:6px 0">
               <div class="muted"><strong>${dn}</strong> • Page ${c.page}</div>
               <div style="margin-top:4px">${snip.replace(/</g,'&lt;')}</div>
             </div>`;
@@ -178,7 +225,37 @@
             ${citeHtml || '<em>No relevant citations.</em>'}
             <div class="muted" style="margin-top:8px">Demo logic: keyword retrieval over sentence chunks; plug a server LLM for abstractive answers.</div>
           `;
+          // Capture a clean text version for download
+          const citationsPlain = res.cites.map(c=>{
+            const dn = docNames[c.doc] || `Doc ${c.doc+1}`;
+            return `- ${dn} • Page ${c.page}: ${c.text}`;
+          }).join('\n');
+          lastAnswerText =
+            `Question: ${q}\n\nAnswer (extractive):\n${res.summary || '(no clear answer)'}\n\nCitations:\n${citationsPlain || '(none)'}`;
         } catch(e){ showError('Failed to answer', e); }
+      });
+
+      // Reset
+      document.getElementById('kb-reset').addEventListener('click', ()=>{
+        filesEl.value = '';
+        qEl.value = '';
+        outEl.style.display = 'none';
+        outEl.innerHTML = '';
+        statusEl.textContent = 'Ready. Choose 1–3 PDFs and click Index PDFs.';
+        askBtn.disabled = true; askBtn.style.background = '#999'; askBtn.style.cursor = 'not-allowed';
+        dbgEl.textContent = '';
+        index = []; docNames = []; lastAnswerText = '';
+      });
+
+      // Download answer
+      document.getElementById('kb-save').addEventListener('click', ()=>{
+        if (!lastAnswerText) { alert('No answer to download yet. Ask a question first.'); return; }
+        const blob = new Blob([lastAnswerText + '\n'], {type:'text/plain'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'kbqa-answer.txt';
+        document.body.appendChild(a); a.click();
+        URL.revokeObjectURL(url); a.remove();
       });
     })();
   </script>
