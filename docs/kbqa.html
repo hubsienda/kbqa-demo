@@ -259,5 +259,26 @@
       });
     })();
   </script>
+
+  <script>
+/* Post height to parent (Carrd) so the iframe can auto-resize */
+(function(){
+  function sendHeight(){
+    var h = Math.max(
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight
+    );
+    parent.postMessage({ kbqaHeight: h }, '*');
+  }
+  window.addEventListener('load', sendHeight);
+  // Update on content changes/resizes
+  var ro = new ResizeObserver(sendHeight);
+  ro.observe(document.body);
+  window.addEventListener('click', sendHeight);
+  window.addEventListener('input', sendHeight);
+})();
+</script>
+
+  
 </body>
 </html>
