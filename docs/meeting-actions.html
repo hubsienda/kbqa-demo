@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meeting → Actions</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:0;padding:24px;background:#fff}
+  .card{max-width:860px;margin:0 auto 16px;padding:16px;border:1px solid #eee;border-radius:14px}
+  button{cursor:pointer}
+  pre{white-space:pre-wrap;background:#fcfcfc;border:1px solid #eee;border-radius:10px;padding:10px}
+  .muted{font-size:12px;color:#555}
+</style>
+</head>
+<body>
+<div class="card">
+  <h3 style="margin:0 0 6px">Meeting → Actions</h3>
+  <p style="margin:0 0 10px;color:#444">Paste notes, then extract action items, owners, and deadlines. Runs entirely in your browser.</p>
+  <textarea id="mta-text" rows="8" placeholder="e.g., Luca will send revised price list by Friday. @Sara to prepare pallet plan for apples (due 24/08). Follow up with Carlo next week on shelf-life KPIs." style="width:100%;padding:10px;border:1px solid #ddd;border-radius:10px"></textarea>
+  <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+    <button id="mta-run" style="padding:10px 12px;border:0;border-radius:10px;background:#111;color:#fff">Extract actions</button>
+    <button id="mta-copy" style="padding:10px 12px;border:1px solid #111;border-radius:10px;background:#fff">Copy checklist</button>
+  </div>
+  <div id="mta-out" style="display:none;margin-top:12px;padding:12px;background:#f8fafc;border-radius:12px"></div>
+  <details style="margin-top:10px"><summary>How it works</summary>
+    <div class="muted">Deterministic rules: verbs (send/prepare/confirm…), @mentions or leading Names → owner; dates like 24/08, Fri, EOD → due.</div>
+  </details>
+</div>
+
+<script>
+(function(){
+  const out = document.getElementById('mta-out');
+  function findOwner(s){
+    const at = s.match(/@([A-Za-zÀ-ÖØ-öø-ÿ\-']{2,})/);
+    if(at) return at[1];
+    const m = s.match(/\b([A-Z][a-zÀ-ÖØ-öø-ÿ\-']{2,})\b\s+(?:will|shall|must|to)\b/);
+    return m?m[1]:'Unassigned';
+  }
+  function findDue(s){
+    const dmy = s.match(/\b(\d{1,2}[\/\.-]\d{1,2})(?:[\/\.-]\d{2,4})?\b/);
+    if(dmy) return dmy[1];
+    const words = s.match(/\b(today|tomorrow|eod|cob|monday|tuesday|wednesday|thursday|friday|next week)\b/i);
+    return words?words[1]:'—';
+  }
+  function isAction(s){
+    return /(\bto\s+(send|prepare|review|draft|call|email|confirm|ship|book|quote)\b)|\b(will|shall|must)\b/i.test(s);
+  }
+  function normalise(s){ return s.replace(/\s+/g,' ').trim(); }
+  function extract(text){
+    const lines = text.split(/\n|(?<=[\.!?])\s+/);
+    const tasks = [];
+    lines.forEach(raw=>{
+      const s = normalise(raw);
+      if(!s) return;
+      if(isAction(s)){ tasks.push({task:s, owner:findOwner(s), due:findDue(s)}); }
+    });
+    return tasks;
+  }
+  document.getElementById('mta-run').addEventListener('click', ()=>{
+    const text = document.getElementById('mta-text').value||'';
+    const tasks = extract(text);
+    out.style.display='block';
+    if(!tasks.length){ out.innerHTML='<em>No clear actions found.</em>'; return; }
+    const html = tasks.map(t=>`<li><strong>${t.owner}</strong>: ${t.task} <em>(Due: ${t.due})</em></li>`).join('');
+    out.innerHTML = `<div style="margin-bottom:6px"><strong>Checklist</strong></div><ol>${html}</ol>`;
+    out.dataset.clip = tasks.map(t=>`- [ ] ${t.task} (Owner: ${t.owner}; Due: ${t.due})`).join('\n');
+    postHeight();
+  });
+  document.getElementById('mta-copy').addEventListener('click', async ()=>{
+    const clip = out.dataset.clip||'';
+    if(!clip){ alert('Nothing to copy yet.'); return; }
+    try{ await navigator.clipboard.writeText(clip); alert('Checklist copied.'); }catch(e){ alert('Copy failed.'); }
+  });
+  function postHeight(){
+    const h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+    parent.postMessage({ kbqaHeight:h, frameId: new URLSearchParams(location.search).get('frameId') || '' }, '*');
+  }
+  window.addEventListener('load', postHeight);
+  new ResizeObserver(postHeight).observe(document.body);
+  ['click','input'].forEach(ev=>window.addEventListener(ev, postHeight));
+})();
+</script>
+</body>
+</html>
